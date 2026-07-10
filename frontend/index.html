@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>千川AI投放工具</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="config.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .sidebar { min-height: 100vh; }
+        .content-area { min-height: 100vh; }
+        .card { transition: all 0.3s ease; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
+        .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .status-badge { padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+        .status-enable { background: #d4edda; color: #155724; }
+        .status-disable { background: #f8d7da; color: #721c24; }
+        .status-audit { background: #fff3cd; color: #856404; }
+        .loading-spinner { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- 登录/授权页面 -->
+        <div v-if="!isAuthorized" class="min-h-screen flex items-center justify-center bg-gray-100">
+            <div class="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
+                <div class="text-center mb-6">
+                    <i class="fas fa-rocket text-5xl text-purple-600 mb-4"></i>
+                    <h1 class="text-2xl font-bold text-gray-800">千川AI投放工具</h1>
+                    <p class="text-gray-600 mt-2">基于巨量千川开放平台的智能投放管理系统</p>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">API服务地址</label>
+                        <input v-model="apiBaseUrl" type="text" placeholder="http://localhost:8000" 
+                               class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                    </div>
+                    <button @click="getAuthUrl" 
+                            class="w-full btn-primary text-white py-3 rounded-lg font-medium hover:opacity-90 transition"
+                            :disabled="loading">
+                        <span v-if="loading"><i class="fas fa-spinner loading-spinner mr-2"></i>加载中...</span>
+                        <span v-else><i class="fas fa-key mr-2"></i>前往千川授权</span>
+                    </button>
+                </div>
+                <div v-if="authUrl" class="mt-4 p-4 bg-blue-50 rounded-lg">
+                    <p class="text-sm text-blue-700 mb-2">授权链接已生成：</p>
+                    <a :href="authUrl" target="_blank" class="text-purple-600 hover:underline text-sm break-all">{{ authUrl }}</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主界面 -->
+        <div v-else class="flex">
+            <!-- 侧边栏 -->
+            <aside class="sidebar w-64 bg-gray-800 text-white fixed">
+                <div class="p-6">
+                    <div class="flex items-center space-x-3">
+                        <i class="fas fa-rocket text-2xl text-purple-400"></i>
+                        <span class="text-xl font-bold">千川AI工具</span>
+                    </div>
+                </div>
+                <nav class="mt-6">
+                    <a v-for="item in menuItems" :key="item.id"
+                       @click="currentTab = item.id"
+                       :class="{'bg-purple-600': currentTab === item.id, 'hover:bg-gray-700': currentTab !== item.id}"
+                       class="flex items-center px-6 py-3 cursor-pointer transition">
+                        <i :class="item.icon" class="w-6"></i>
+                        <span>{{ item.name }}</span>
+                    </a>
+                </nav>
+                <div class="absolute bottom-0 w-full p-6">
+                    <div class="bg-gray-700 rounded-lg p-4">
+                        <p class="text-sm text-gray-300">当前广告主</p>
+                        <p class="font-medium">{{ currentAdvertiser }}</p>
+                        <button @click="logout" class="mt-2 text-xs text-red-400 hover:text-red-300">
+                            <i class="fas fa-sign-out-alt mr-1"></i>退出登录
+                        </button>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- 内容区域 -->
+            <main class="content-area flex-1 ml-64 p-8 bg-gray-100">
+                <!-- 概览页 -->
+                <div v-if="currentTab === 'dashboard'">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-6">投放概览</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                        <div class="bg-white rounded-lg shadow p-6 card">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm text-gray-500">账户余额</p>
+                                    <p class="text-2xl font-bold text-gray-800">¥{{ accountBalance.toFixed(2) }}</p>
+                                </div>
+                                <i class="fas fa-wallet text-3xl text-blue-500"></i>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-lg shadow p-6 card">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm text-gray-500">今日消耗</p>
+                                    <p class="text-2xl font-bold text-gray-800">¥{{ todayCost.toFixed(2) }}</p>
+                                </div>
+                                <i class="fas fa-fire text-3xl text-red-500"></i>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-lg shadow p-6 card">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm text-gray-500">活跃计划</p>
+                                    <p class="text-2xl font-bold text-gray-800">{{ activeAdCount }}</p>
+                                </div>
+                                <i class="fas fa-bullhorn text-3xl text-green-500"></i>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-lg shadow p-6 card">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm text-gray-500">平均ROI</p>
+                                    <p class="text-2xl font-bold text-gray-800">{{ totalRoi.toFixed(2) }}</p>
+                                </div>
+                                <i class="fas fa-chart-line text-3xl text-purple-500"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-bold mb-4">AI策略任务</h3>
+                        <div v-if="aiTasks.length === 0" class="text-gray-500 text-center py-8">
+                            <i class="fas fa-robot text-4xl mb-2 text-gray-300"></i>
+                            <p>暂无AI策略任务</p>
+                        </div>
+                        <div v-else class="space-y-3">
+                            <div v-for="task in aiTasks" :key="task.task_id" class="border rounded-lg p-4 hover:bg-gray-50 transition">
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <span class="font-medium">{{ task.strategy_config.strategy_name }}</span>
+                                        <span class="ml-2 text-sm text-gray-500">ID: {{ task.task_id }}</span>
+                                    </div>
+                                    <span :class="{'text-green-600': task.status === 'RUNNING', 'text-yellow-600': task.status === 'PAUSED'}" class="text-sm font-medium">
+                                        {{ task.status }}
+                                    </span>
+                                </div>
+                                <div class="mt-2 text-sm text-gray-500">
+                                    <span>管理计划: {{ task.managed_ad_ids.length }}个</span>
+                                    <span class="ml-4">操作次数: {{ task.total_actions }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 其他页面内容省略，完整代码在GitHub仓库中 -->
+                <div v-if="currentTab === 'report'">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-6">
+                        <i class="fas fa-mobile-alt text-purple-600 mr-2"></i>随心推管理
+                    </h2>
+                    <p class="text-gray-500">完整随心推管理界面包含：标准随心推、随心推全域、AI策略、批量创建等功能。</p>
+                    <p class="text-gray-500 mt-2">请查看完整代码：frontend/index.html</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, reactive, onMounted } = Vue;
+        createApp({
+            setup() {
+                const isAuthorized = ref(false);
+                const loading = ref(false);
+                const currentTab = ref('dashboard');
+                const apiBaseUrl = ref(window.APP_CONFIG?.API_BASE_URL || 'http://localhost:8000');
+                const authUrl = ref('');
+                const currentAdvertiser = ref('未选择');
+                const menuItems = [
+                    { id: 'dashboard', name: '投放概览', icon: 'fas fa-tachometer-alt' },
+                    { id: 'ads', name: '标准推广', icon: 'fas fa-bullhorn' },
+                    { id: 'uni', name: '全域推广', icon: 'fas fa-globe' },
+                    { id: 'ai', name: 'AI策略', icon: 'fas fa-robot' },
+                    { id: 'report', name: '随心推报表', icon: 'fas fa-mobile-alt' }
+                ];
+                const accountBalance = ref(0);
+                const todayCost = ref(0);
+                const activeAdCount = ref(0);
+                const totalRoi = ref(0);
+                const aiTasks = ref([]);
+
+                const api = axios.create({
+                    baseURL: window.APP_CONFIG?.API_BASE_URL || apiBaseUrl.value,
+                    timeout: 30000
+                });
+
+                const getAuthUrl = async () => {
+                    loading.value = true;
+                    try {
+                        const res = await api.get('/api/v1/auth/url');
+                        authUrl.value = res.data.data.auth_url;
+                    } catch (e) {
+                        alert('获取授权链接失败: ' + e.message);
+                    }
+                    loading.value = false;
+                };
+
+                const checkAuth = async () => {
+                    try {
+                        const res = await api.get('/api/v1/auth/advertisers');
+                        const advertisers = res.data.data.advertiser_ids;
+                        if (advertisers.length > 0) {
+                            isAuthorized.value = true;
+                            currentAdvertiser.value = advertisers[0];
+                        }
+                    } catch (e) {
+                        console.log('未授权');
+                    }
+                };
+
+                const logout = () => {
+                    isAuthorized.value = false;
+                    currentAdvertiser.value = '未选择';
+                };
+
+                onMounted(() => {
+                    checkAuth();
+                });
+
+                return {
+                    isAuthorized, loading, currentTab, menuItems,
+                    apiBaseUrl, authUrl, currentAdvertiser,
+                    accountBalance, todayCost, activeAdCount, totalRoi, aiTasks,
+                    getAuthUrl, checkAuth, logout
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
